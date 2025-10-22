@@ -5,6 +5,8 @@ project (ACMP)
 set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 
 find_package(CUDA 6.0 REQUIRED ) # For Cuda Managed Memory and c++11
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)  # 确保使用指定标准
 find_package(OpenCV REQUIRED )
 find_package(Eigen3 REQUIRED)
 
@@ -20,12 +22,32 @@ include_directories(.
 # glog
 find_package(Gflags REQUIRED)
 find_package(Glog REQUIRED)
+
+# by zwl ========================================
+find_package(Boost REQUIRED COMPONENTS program_options filesystem system)
+file(GLOB_RECURSE LIB_SOURCES 
+    "src/threadpool/*.cpp"
+    "src/threadpool/*.cc"
+    "src/threadpool/*.c"
+    "src/threadpool/*.cxx"
+)
+add_library(threadpool_lib 
+            SHARED
+            ${LIB_SOURCES})
+target_link_libraries(threadpool_lib PRIVATE
+                    Boost::program_options
+                    Boost::filesystem
+                    Boost::system
+                    glog::glog
+)
+#===============================================
+
 include_directories(${GFLAGS_INCLUDE_DIRS} ${GLOG_INCLUDE_DIRS})
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-O3 --use_fast_math --maxrregcount=128 --ptxas-options=-v -std=c++11 --compiler-options -Wall)
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-O3 --use_fast_math --maxrregcount=128 --ptxas-options=-v -std=c++17 --compiler-options -Wall)
 
 if(CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-std=c++11)
+    # add_definitions(-std=c++11)
     add_definitions(-pthread)
     add_definitions(-Wall)
     add_definitions(-Wextra)
@@ -56,6 +78,7 @@ target_link_libraries(main_depth_estimation
     ${OpenCV_LIBS}
     ${GFLAGS_LIBRARIES}
     ${GLOG_LIBRARIES}
+    threadpool_lib
     )
 
 add_executable(main_depth_fusion
@@ -64,6 +87,19 @@ add_executable(main_depth_fusion
     )
 
 target_link_libraries(main_depth_fusion
+    ${OpenCV_LIBS}
+    ${GFLAGS_LIBRARIES}
+    ${GLOG_LIBRARIES}
+    )
+
+
+add_executable(fusion_dev
+    exe/main.cpp
+    src/colmap_interface/colmap_interface.cpp
+    src/colmap_interface/fusion.cpp
+    )
+
+target_link_libraries(fusion_dev
     ${OpenCV_LIBS}
     ${GFLAGS_LIBRARIES}
     ${GLOG_LIBRARIES}

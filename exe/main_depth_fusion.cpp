@@ -1,4 +1,5 @@
 #include "colmap_interface/colmap_interface.h"
+#include "colmap_interface/endian.h"
 
 void StoreColorPlyFileBinaryPointCloud (const std::string &plyFilePath, const std::vector<PointList> &pc)
 {
@@ -53,6 +54,26 @@ void StoreColorPlyFileBinaryPointCloud (const std::string &plyFilePath, const st
 
     }
     fclose(outputPly);
+}
+
+// by zwl;
+void WritePointsVisibility(
+    const std::string& path,
+    const std::vector<std::vector<int>>& points_visibility) {
+  std::fstream file(path, std::ios::out | std::ios::binary);
+  // 替换 THROW_CHECK_FILE_OPEN
+  if (!file.is_open()) {
+    throw std::runtime_error("Cannot open file: " + path);
+  }
+
+  colmap::WriteBinaryLittleEndian<uint64_t>(&file, points_visibility.size());
+
+  for (const auto& visibility : points_visibility) {
+    colmap::WriteBinaryLittleEndian<uint32_t>(&file, visibility.size());
+    for (const auto& image_idx : visibility) {
+      colmap::WriteBinaryLittleEndian<uint32_t>(&file, image_idx);
+    }
+  }
 }
 
 void  RescaleImageAndCamera(cv::Mat_<cv::Vec3b> &src, cv::Mat_<cv::Vec3b> &dst, cv::Mat_<float> &depth, Camera &camera)
@@ -148,7 +169,7 @@ void RunFusion(const Model& model, bool geom_consistency)
     depths.clear();
     normals.clear();
     masks.clear();
-
+    std::vector<std::vector<int>> fused_points_visibility_; // by zwl;
     // read all data
     for (const auto& pair : model.covis_vec) {
         int ref_image_id = pair.first;
@@ -187,6 +208,13 @@ void RunFusion(const Model& model, bool geom_consistency)
         std::vector<int> src_image_ids = pair.second;
         std::cout << "Fusing image " << model.image_id_to_image_name.at(ref_image_id) << std::endl;
 
+        // std::unordered_set<int> fused_point_visibility;
+        // fused_point_visibility.insert(ref_image_id);
+        // for(auto src_image_id : src_image_ids) {
+        //     fused_point_visibility.insert(src_image_id);
+        // }
+        // fused_points_visibility_.emplace_back(std::vector<int>{fused_point_visibility.begin(), fused_point_visibility.end()});
+        
         const auto& ref_image = images.at(ref_image_id);
         const auto& ref_camera = cameras.at(ref_image_id);
         const auto& ref_depthmap = depths.at(ref_image_id);
@@ -214,6 +242,9 @@ void RunFusion(const Model& model, bool geom_consistency)
                 cv::Vec3b ref_color = ref_image.at<cv::Vec3b>(r, c);
                 float consistent_Color[3] = {(float)ref_color[0], (float)ref_color[1], (float)ref_color[2]};
                 int num_consistent = 0;
+
+                std::unordered_set<int> fused_point_visibility;
+                fused_point_visibility.insert(ref_image_id);
 
                 for (int j = 0; j < num_ngb; ++j) {
                     int src_image_id = src_image_ids[j];
@@ -255,7 +286,7 @@ void RunFusion(const Model& model, bool geom_consistency)
                             consistent_Color[0] += src_image.at<cv::Vec3b>(src_r, src_c)[0];
                             consistent_Color[1] += src_image.at<cv::Vec3b>(src_r, src_c)[1];
                             consistent_Color[2] += src_image.at<cv::Vec3b>(src_r, src_c)[2];
-
+                            fused_point_visibility.insert(src_image_id);
                             used_list[j].x = src_c;
                             used_list[j].y = src_r;
                             num_consistent++;
@@ -277,7 +308,7 @@ void RunFusion(const Model& model, bool geom_consistency)
                     point3D.normal = make_float3(consistent_normal[0], consistent_normal[1], consistent_normal[2]);
                     point3D.color = make_float3(consistent_Color[0], consistent_Color[1], consistent_Color[2]);
                     PointCloud.push_back(point3D);
-
+                    fused_points_visibility_.emplace_back(std::vector<int>{fused_point_visibility.begin(), fused_point_visibility.end()});
                     for (int j = 0; j < num_ngb; ++j) {
                         if (used_list[j].x == -1)
                             continue;
@@ -288,8 +319,15 @@ void RunFusion(const Model& model, bool geom_consistency)
         }
     }
 
-    std::string ply_path = model.root_folder + "/ACMP_model.ply";
+    std::cout<<"PointCloud.size() is: "<<PointCloud.size()<<std::endl;
+    std::cout<<"Fused points visibility size: " << fused_points_visibility_.size() << std::endl;
+
+    std::string ply_path = model.root_folder + "/fused.ply";
     StoreColorPlyFileBinaryPointCloud (ply_path, PointCloud);
+
+    // by zwl;
+    std::string vis_path = model.root_folder + "/fused.ply.vis";
+    WritePointsVisibility(vis_path, fused_points_visibility_);
 }
 
 int main(int argc, char** argv)

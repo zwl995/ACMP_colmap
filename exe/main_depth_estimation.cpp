@@ -1,5 +1,9 @@
 #include "colmap_interface/colmap_interface.h"
 #include "ACMP.h"
+#include "threadpool/threading.h"
+#include "threadpool/misc.h"
+#include "threadpool/logging.h"
+#include <numeric>
 
 void CreateProblems(const Model& model, std::vector<Problem>& problems) {
     for (const auto& pair : model.covis_vec) {
@@ -14,7 +18,7 @@ void CreateProblems(const Model& model, std::vector<Problem>& problems) {
     }
 }
 
-void ProcessProblem(const Problem &problem, const Model& model, bool geom_consistency, bool planar_prior, bool multi_geometry = false)
+void ProcessProblem(const Problem &problem, const Model& model, bool geom_consistency, bool planar_prior, const int gpu_index, bool multi_geometry = false)
 {
     std::string dense_folder = model.root_folder;
     std::string imageName = model.image_id_to_image_name.at(problem.ref_image_id);
@@ -27,7 +31,7 @@ void ProcessProblem(const Problem &problem, const Model& model, bool geom_consis
     }
     acmp.InuputInitialization(dense_folder, problem);
 
-    acmp.CudaSpaceInitialization(dense_folder, problem);
+    acmp.CudaSpaceInitialization(dense_folder, problem, gpu_index);
     acmp.RunPatchMatch();
 
     const int width = acmp.GetReferenceImageWidth();
@@ -144,6 +148,19 @@ void ProcessProblem(const Problem &problem, const Model& model, bool geom_consis
     std::cout << "Processing image " << imageName << " done!" << std::endl;
 }
 
+std::vector<int> GetGpuIndexs(const std::string &gpu_indexs)
+{
+    auto gpu_indices_ = CSVToVector<int>(gpu_indexs);
+    if (gpu_indices_.size() == 1 && gpu_indices_[0] == -1) {
+    //   const int num_cuda_devices = GetNumCudaDevices();
+    //   THROW_CHECK_GT(num_cuda_devices, 0);
+    //   gpu_indices_.resize(num_cuda_devices);
+    //   std::iota(gpu_indices_.begin(), gpu_indices_.end(), 0);
+    gpu_indices_ = {0,1,2,3};
+    }
+    return gpu_indices_;
+}
+
 int main(int argc, char** argv)
 {
     double t_start = cv::getTickCount();
@@ -159,6 +176,11 @@ int main(int argc, char** argv)
     }
 
     std::string dense_folder = argv[1];
+
+    // by zwl
+    std::string gpu_indexs = (argc >= 3) ? argv[2] : "-1";
+    std::vector<int> gpu_indexs_ = GetGpuIndexs(gpu_indexs);
+
     Model model(dense_folder, "sparse", "stereo/depth_maps", "stereo/normal_maps", "images");
     model.Read();
     model.ReduceMemory();
@@ -171,24 +193,39 @@ int main(int argc, char** argv)
 
     bool geom_consistency = false;
     bool planar_prior = true;
+    std::cout<<"gpu_indexs_.size() is: "<<gpu_indexs_.size()<<std::endl;
+    std::unique_ptr<ThreadPool> thread_pool_ = std::make_unique<ThreadPool>(gpu_indexs_.size());
+    std::cout<< "Number of threads in the pool: " << thread_pool_->NumThreads() << std::endl;
     for (size_t i = 0; i < num_images; ++i) {
-        ProcessProblem(problems[i], model, geom_consistency, planar_prior);
+        // ProcessProblem(problems[i], model, geom_consistency, planar_prior);
+        // std::cout<<"thread_pool_->GetThreadIndex() is: "<<thread_pool_->GetThreadIndex()<<std::endl;
+        // const int gpu_index = gpu_indexs_.at(thread_pool_->GetThreadIndex());
+        const int gpu_index = i % gpu_indexs_.size();
+        // std::cout<<"gpu_index is: "<<gpu_index<<std::endl;
+        thread_pool_->AddTask(&ProcessProblem,
+                             problems[i],
+                             model,
+                             geom_consistency,
+                             planar_prior,
+                             gpu_index,
+                             false);
     }
+    thread_pool_->Wait();
 
-    bool multi_geometry = false;
-    int geom_iteration = 2;
-    geom_consistency = true;
-    planar_prior = false;
-    for(int geom_iter = 0; geom_iter < geom_iteration; ++geom_iter) {
-        if(geom_iter == 0) {
-            multi_geometry = false;
-        } else {
-            multi_geometry = true;
-        }
-        for (size_t i = 0; i < num_images; ++i) {
-            ProcessProblem(problems[i], model, geom_consistency, planar_prior, multi_geometry);
-        }
-    }
+    // bool multi_geometry = false;
+    // int geom_iteration = 2;
+    // geom_consistency = true;
+    // planar_prior = false;
+    // for(int geom_iter = 0; geom_iter < geom_iteration; ++geom_iter) {
+    //     if(geom_iter == 0) {
+    //         multi_geometry = false;
+    //     } else {
+    //         multi_geometry = true;
+    //     }
+    //     for (size_t i = 0; i < num_images; ++i) {
+    //         ProcessProblem(problems[i], model, geom_consistency, planar_prior, multi_geometry);
+    //     }
+    // }
 
     double t_end = cv::getTickCount();
     double t_used = (t_end - t_start) / cv::getTickFrequency() / 60;

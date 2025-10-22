@@ -48,7 +48,7 @@ public:
 
     void InuputInitialization(const std::string &dense_folder, const Problem &problem);
     void Colmap2MVS(const std::string &dense_folder, std::vector<Problem> &problems);
-    void CudaSpaceInitialization(const std::string &dense_folder, const Problem &problem);
+    void CudaSpaceInitialization(const std::string &dense_folder, const Problem &problem, const int gpu_index);
     void RunPatchMatch();
     void SetGeomConsistencyParams(bool multi_geometry = false);
     void SetPlanarPriorParams();

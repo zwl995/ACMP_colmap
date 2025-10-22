@@ -243,8 +243,16 @@ void ACMP::InuputInitialization(const std::string &dense_folder, const Problem &
     }
 }
 
-void ACMP::CudaSpaceInitialization(const std::string &dense_folder, const Problem &problem)
+void ACMP::CudaSpaceInitialization(const std::string &dense_folder, const Problem &problem, const int gpu_index)
 {
+    // === by zwl：指定显卡 ===
+    // int targetGPU = 3; // 使用第二张显卡（根据实际情况调整）
+    cudaError_t err = cudaSetDevice(gpu_index);
+    if (err != cudaSuccess) {
+        std::cerr << "Failed to set GPU: " << cudaGetErrorString(err) << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
     num_images = (int)images.size();
 
     for (int i = 0; i < num_images; ++i) {
